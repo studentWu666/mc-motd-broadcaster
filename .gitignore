@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Windows
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.so
+*.dylib
+*.pyd
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~\n
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Configuration
+*.cfg
+*.ini
+*.local
+
+# Build
+build/
+dist/
+*.spec
+*.egg-info/
+*.manifest
+
+# Temp
+新建文件夹/
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Misc
+*.pid
+*.seed
+*.pid.lock

@@ -1,0 +1,18 @@
+{
+    "motd_count": 1,
+    "motd": "§5ST§b-§6Mini§eGames§r | §emc.bubanle.cn§r | §2§oMiniGames§e§o§l小§a§l§o游§6§l§o戏§d§l§o地图§r | §dRadmin§4§n延迟较高",
+    "base_port": 25565,
+    "interval": 3.0,
+    "auto_motd": false,
+    "silent": false,
+    "address": "192.168.5.5",
+    "servers": [
+        {
+            "name": "服务器 1",
+            "motd": "§5ST§b-§6Mini§eGames§r | §emc.bubanle.cn§r | §2§oMiniGames§e§o§l小§a§l§o游§6§l§o戏§d§l§o地图§r | §dRadmin§4§n延迟较高",
+            "port": 25565,
+            "interval": 3.0,
+            "auto_motd": false
+        }
+    ]
+}

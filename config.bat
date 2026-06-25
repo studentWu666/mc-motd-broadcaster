@@ -1,0 +1,1 @@
+python mc_motd_broadcaster_config.py --config test.json

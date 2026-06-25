@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
 import socket
+import select
 import threading
 import time
 import sys
@@ -37,7 +38,7 @@ import struct
 import os
 import json
 
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 
 class MinecraftMOTDBroadcaster:
     """Broadcasts Minecraft server MOTD over LAN network."""
@@ -150,6 +151,107 @@ class MinecraftMOTDBroadcaster:
                f"Port: {self.server_port}\n" \
                f"Broadcast: {self.MULTICAST_ADDRESS}:{self.BROADCAST_PORT}\n" \
                f"Interval: {self.BROADCAST_INTERVAL}s"
+
+
+class TCPForwarder:
+    """TCP 端口转发 — 将外部连接转发到目标服务器。"""
+
+    def __init__(self, listen_port, target_host, target_port):
+        self.listen_port = listen_port
+        self.target_host = target_host
+        self.target_port = target_port
+        self._stop_event = threading.Event()
+        self._server = None
+        self._thread = None
+        self._connections = []
+
+    def start(self):
+        if self._server is not None:
+            raise RuntimeError("Forwarder is already running")
+        self._stop_event.clear()
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server.bind(('0.0.0.0', self.listen_port))
+        self._server.listen(10)
+        self._server.settimeout(1.0)
+        self._thread = threading.Thread(target=self._accept_loop, name="TCPFwd")
+        self._thread.daemon = True
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        # close all active connections
+        for conn in self._connections[:]:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        self._connections.clear()
+        if self._server:
+            try:
+                self._server.close()
+            except Exception:
+                pass
+            self._server = None
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3)
+            self._thread = None
+
+    def is_running(self):
+        return self._thread is not None and self._thread.is_alive()
+
+    def _accept_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                client, addr = self._server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            t = threading.Thread(target=self._handle, args=(client, addr),
+                                 name="TCPFwdConn", daemon=True)
+            t.start()
+
+    def _handle(self, client, addr):
+        self._connections.append(client)
+        try:
+            target = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            target.settimeout(10)
+            try:
+                target.connect((self.target_host, self.target_port))
+            except Exception:
+                client.close()
+                return
+            target.settimeout(None)
+            self._relay(client, target)
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+            if client in self._connections:
+                self._connections.remove(client)
+
+    @staticmethod
+    def _relay(src, dst):
+        """双向转发数据，直到任一端关闭。"""
+        sockets = [src, dst]
+        try:
+            while True:
+                r, _, _ = select.select(sockets, [], [], 1)
+                if not r:
+                    continue
+                for s in r:
+                    data = s.recv(65536)
+                    if not data:
+                        return
+                    dst_sock = dst if s is src else src
+                    dst_sock.sendall(data)
+        except (OSError, ConnectionResetError, BrokenPipeError):
+            pass
+
+    def get_active_count(self):
+        return len(self._connections)
 
 def load_config(config_path):
     """Load configuration from a JSON file with multi-server support.

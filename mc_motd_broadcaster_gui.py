@@ -19,15 +19,14 @@ from qfluentwidgets import (
     FluentWindow, NavigationItemPosition, FluentIcon,
     LineEdit, PushButton, SpinBox, DoubleSpinBox,
     CardWidget, BodyLabel, StrongBodyLabel,
-    TextEdit, PlainTextEdit,
+    TextEdit, PlainTextEdit, SwitchButton,
     setTheme, Theme,
-    MessageBox, PrimaryPushButton, ToolButton,
-    FlowLayout, PillPushButton,
+    MessageBox, PrimaryPushButton,
 )
 
 import mc_motd_broadcaster_config as motd_broadcaster
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # ── Minecraft 颜色映射 ──────────────────────────────────────────
 COLORS = [
@@ -119,6 +118,7 @@ class BroadcastPage(CardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.broadcasters = []
+        self.forwarders = []
         self.config_path = "mc_motd_config.json"
         self.config = {}
         self._timer = QTimer(self)
@@ -166,6 +166,41 @@ class BroadcastPage(CardWidget):
         row3.addWidget(self.interval_spin)
         row3.addStretch()
         layout.addLayout(row3)
+
+        # ── 端口转发 ──
+        self._forwarding_card = QWidget()
+        fwd_layout = QVBoxLayout(self._forwarding_card)
+        fwd_layout.setContentsMargins(0, 8, 0, 0)
+        fwd_layout.setSpacing(6)
+
+        fwd_header = QHBoxLayout()
+        self.fwd_switch = SwitchButton(self._forwarding_card)
+        self.fwd_switch.setText("端口转发")
+        fwd_header.addWidget(self.fwd_switch)
+        fwd_header.addStretch()
+        fwd_layout.addLayout(fwd_header)
+
+        fwd_row = QHBoxLayout()
+        fwd_row.addWidget(BodyLabel("目标地址"))
+        self.fwd_host = LineEdit(self._forwarding_card)
+        self.fwd_host.setPlaceholderText("localhost")
+        self.fwd_host.setText("localhost")
+        fwd_row.addWidget(self.fwd_host)
+
+        self.fwd_port_btn = PushButton("同广播端口", self._forwarding_card)
+        self.fwd_port_btn.setEnabled(False)
+        fwd_row.addWidget(self.fwd_port_btn)
+        fwd_row.addStretch()
+        fwd_layout.addLayout(fwd_row)
+
+        fwd_tip = BodyLabel("外部玩家连接到此机器的广播端口时，自动转发到目标地址")
+        fwd_tip.setStyleSheet("color: #888; font-size: 11px;")
+        fwd_layout.addWidget(fwd_tip)
+
+        self._forwarding_card.setVisible(False)
+        layout.addWidget(self._forwarding_card)
+        self.fwd_switch.checkedChanged.connect(
+            lambda checked: self._forwarding_card.setVisible(checked))
 
         btn_row = QHBoxLayout()
         self.start_btn = PrimaryPushButton("▶  开始广播", self)
@@ -220,7 +255,11 @@ class BroadcastPage(CardWidget):
         self.save_config()
         self.config = motd_broadcaster.load_config(self.config_path)
         self.broadcasters = []
+        self.forwarders = []
         try:
+            enable_fwd = self.fwd_switch.isChecked()
+            target_host = self.fwd_host.text().strip() or "localhost"
+
             for server in self.config["servers"]:
                 bc = motd_broadcaster.MinecraftMOTDBroadcaster(
                     server["motd"], server["port"]
@@ -228,8 +267,22 @@ class BroadcastPage(CardWidget):
                 bc.BROADCAST_INTERVAL = server["interval"]
                 bc.start()
                 self.broadcasters.append(bc)
+
+                if enable_fwd:
+                    try:
+                        fwd = motd_broadcaster.TCPForwarder(
+                            server["port"], target_host, server["port"]
+                        )
+                        fwd.start()
+                        self.forwarders.append(fwd)
+                    except Exception as e:
+                        self._warn(f"转发 {server['port']}→{target_host}:{server['port']} 失败: {e}")
+
             self.start_btn.setText("■  停止广播")
-            self._info(f"已开始广播 {len(self.broadcasters)} 个服务器")
+            info = f"已开始广播 {len(self.broadcasters)} 个服务器"
+            if self.forwarders:
+                info += f"，{len(self.forwarders)} 个转发已启动"
+            self._info(info)
             self._timer.start(2000)
         except Exception as e:
             self._warn(f"启动广播失败: {e}")
@@ -238,6 +291,9 @@ class BroadcastPage(CardWidget):
         for bc in self.broadcasters:
             bc._stop_event.set()
         self.broadcasters = []
+        for fwd in self.forwarders:
+            fwd.stop()
+        self.forwarders = []
         self.start_btn.setText("▶  开始广播")
         self._timer.stop()
         self._info("已停止所有广播")
@@ -256,6 +312,8 @@ class BroadcastPage(CardWidget):
         self._timer.stop()
         for bc in self.broadcasters:
             bc._stop_event.set()
+        for fwd in self.forwarders:
+            fwd.stop()
 
     def set_motd(self, text):
         """从 MOTD 编辑器接收编辑后的文本。"""

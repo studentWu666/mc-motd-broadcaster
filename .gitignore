@@ -45,6 +45,10 @@ dist/
 *.egg-info/
 *.manifest
 
+# Configuration (personal)
+mc_motd_config.json
+test.json
+
 # Temp
 新建文件夹/
 

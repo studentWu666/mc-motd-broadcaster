@@ -1,0 +1,8 @@
+{
+    "motd_count": 1,
+    "motd": "A Minecraft Server",
+    "base_port": 25565,
+    "interval": 3.0,
+    "auto_motd": false,
+    "silent": false
+}

@@ -154,12 +154,18 @@ class MinecraftMOTDBroadcaster:
 
 
 class TCPForwarder:
-    """TCP 端口转发 — 将外部连接转发到目标服务器。"""
+    """TCP 端口转发 — 将外部连接转发到目标服务器。
 
-    def __init__(self, listen_port, target_host, target_port):
+    启用 PROXY protocol 后，连接目标服务器时会先发送
+    PROXY TCP4 <client_ip> <proxy_ip> <port> <port>\\r\\n 头，
+    让服务端（Paper/Velocity 等）识别玩家真实 IP。
+    """
+
+    def __init__(self, listen_port, target_host, target_port, use_proxy=False):
         self.listen_port = listen_port
         self.target_host = target_host
         self.target_port = target_port
+        self.use_proxy = use_proxy
         self._stop_event = threading.Event()
         self._server = None
         self._thread = None
@@ -180,7 +186,6 @@ class TCPForwarder:
 
     def stop(self):
         self._stop_event.set()
-        # close all active connections
         for conn in self._connections[:]:
             try:
                 conn.close()
@@ -199,6 +204,9 @@ class TCPForwarder:
 
     def is_running(self):
         return self._thread is not None and self._thread.is_alive()
+
+    def get_active_count(self):
+        return len(self._connections)
 
     def _accept_loop(self):
         while not self._stop_event.is_set():
@@ -223,6 +231,20 @@ class TCPForwarder:
                 client.close()
                 return
             target.settimeout(None)
+
+            # PROXY protocol v1 header
+            if self.use_proxy:
+                client_ip, client_port = addr
+                proxy_ip = socket.gethostbyname(socket.gethostname())
+                header = (f"PROXY TCP4 {client_ip} {proxy_ip} "
+                          f"{client_port} {self.listen_port}\r\n").encode()
+                try:
+                    target.sendall(header)
+                except Exception:
+                    target.close()
+                    client.close()
+                    return
+
             self._relay(client, target)
         finally:
             try:
@@ -234,7 +256,6 @@ class TCPForwarder:
 
     @staticmethod
     def _relay(src, dst):
-        """双向转发数据，直到任一端关闭。"""
         sockets = [src, dst]
         try:
             while True:
@@ -250,8 +271,6 @@ class TCPForwarder:
         except (OSError, ConnectionResetError, BrokenPipeError):
             pass
 
-    def get_active_count(self):
-        return len(self._connections)
 
 def load_config(config_path):
     """Load configuration from a JSON file with multi-server support.

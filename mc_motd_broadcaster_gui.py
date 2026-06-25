@@ -168,39 +168,52 @@ class BroadcastPage(CardWidget):
         layout.addLayout(row3)
 
         # ── 端口转发 ──
-        self._forwarding_card = QWidget()
-        fwd_layout = QVBoxLayout(self._forwarding_card)
-        fwd_layout.setContentsMargins(0, 8, 0, 0)
-        fwd_layout.setSpacing(6)
-
         fwd_header = QHBoxLayout()
-        self.fwd_switch = SwitchButton(self._forwarding_card)
+        self.fwd_switch = SwitchButton()
         self.fwd_switch.setText("端口转发")
         fwd_header.addWidget(self.fwd_switch)
         fwd_header.addStretch()
-        fwd_layout.addLayout(fwd_header)
+        layout.addLayout(fwd_header)
 
-        fwd_row = QHBoxLayout()
-        fwd_row.addWidget(BodyLabel("目标地址"))
-        self.fwd_host = LineEdit(self._forwarding_card)
+        self._fwd_details = QWidget()
+        fwd_layout = QVBoxLayout(self._fwd_details)
+        fwd_layout.setContentsMargins(0, 0, 0, 0)
+        fwd_layout.setSpacing(6)
+
+        # 监听端口（联动广播端口）
+        listen_row = QHBoxLayout()
+        listen_row.addWidget(BodyLabel("监听端口: 同广播端口"))
+        listen_row.addWidget(BodyLabel("→"))
+        self.fwd_host = LineEdit()
         self.fwd_host.setPlaceholderText("localhost")
         self.fwd_host.setText("localhost")
-        fwd_row.addWidget(self.fwd_host)
+        listen_row.addWidget(self.fwd_host)
+        self.fwd_port = SpinBox()
+        self.fwd_port.setRange(1, 65535)
+        self.fwd_port.setValue(25565)
+        listen_row.addWidget(self.fwd_port)
+        listen_row.addStretch()
+        fwd_layout.addLayout(listen_row)
 
-        self.fwd_port_btn = PushButton("同广播端口", self._forwarding_card)
-        self.fwd_port_btn.setEnabled(False)
-        fwd_row.addWidget(self.fwd_port_btn)
-        fwd_row.addStretch()
-        fwd_layout.addLayout(fwd_row)
+        proxy_row = QHBoxLayout()
+        self.fwd_proxy = SwitchButton()
+        self.fwd_proxy.setText("PROXY protocol")
+        proxy_row.addWidget(self.fwd_proxy)
+        proxy_row.addStretch()
+        fwd_layout.addLayout(proxy_row)
 
-        fwd_tip = BodyLabel("外部玩家连接到此机器的广播端口时，自动转发到目标地址")
+        fwd_tip = BodyLabel("外部玩家连接 监听端口+i，自动转发到 目标地址:目标端口")
         fwd_tip.setStyleSheet("color: #888; font-size: 11px;")
         fwd_layout.addWidget(fwd_tip)
 
-        self._forwarding_card.setVisible(False)
-        layout.addWidget(self._forwarding_card)
-        self.fwd_switch.checkedChanged.connect(
-            lambda checked: self._forwarding_card.setVisible(checked))
+        fwd_note = BodyLabel("PROXY protocol: 服务端需开启 PROXY 支持 (Paper 等)。数据仍走跳板机中转，但服务端可识别玩家真实 IP")
+        fwd_note.setStyleSheet("color: #888; font-size: 11px; background: #262626; border-radius: 4px; padding: 6px;")
+        fwd_note.setWordWrap(True)
+        fwd_layout.addWidget(fwd_note)
+
+        self._fwd_details.setVisible(False)
+        layout.addWidget(self._fwd_details)
+        self.fwd_switch.checkedChanged.connect(self._fwd_details.setVisible)
 
         btn_row = QHBoxLayout()
         self.start_btn = PrimaryPushButton("▶  开始广播", self)
@@ -228,6 +241,14 @@ class BroadcastPage(CardWidget):
             self.port_spin.setValue(self.config["base_port"])
         if "interval" in self.config:
             self.interval_spin.setValue(self.config["interval"])
+        if "enable_fwd" in self.config:
+            self.fwd_switch.setChecked(self.config["enable_fwd"])
+        if "fwd_host" in self.config:
+            self.fwd_host.setText(self.config["fwd_host"])
+        if "fwd_port" in self.config:
+            self.fwd_port.setValue(self.config["fwd_port"])
+        if "fwd_proxy" in self.config:
+            self.fwd_proxy.setChecked(self.config["fwd_proxy"])
         if not silent:
             self._info(f"已加载配置文件: {self.config_path}")
 
@@ -236,6 +257,10 @@ class BroadcastPage(CardWidget):
         self.config["motd_count"] = self.count_spin.value()
         self.config["base_port"] = self.port_spin.value()
         self.config["interval"] = self.interval_spin.value()
+        self.config["enable_fwd"] = self.fwd_switch.isChecked()
+        self.config["fwd_host"] = self.fwd_host.text().strip()
+        self.config["fwd_port"] = self.fwd_port.value()
+        self.config["fwd_proxy"] = self.fwd_proxy.isChecked()
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
@@ -259,8 +284,10 @@ class BroadcastPage(CardWidget):
         try:
             enable_fwd = self.fwd_switch.isChecked()
             target_host = self.fwd_host.text().strip() or "localhost"
+            target_port = self.fwd_port.value()
+            use_proxy = self.fwd_proxy.isChecked()
 
-            for server in self.config["servers"]:
+            for i, server in enumerate(self.config["servers"]):
                 bc = motd_broadcaster.MinecraftMOTDBroadcaster(
                     server["motd"], server["port"]
                 )
@@ -271,17 +298,17 @@ class BroadcastPage(CardWidget):
                 if enable_fwd:
                     try:
                         fwd = motd_broadcaster.TCPForwarder(
-                            server["port"], target_host, server["port"]
+                            server["port"], target_host, target_port, use_proxy
                         )
                         fwd.start()
                         self.forwarders.append(fwd)
                     except Exception as e:
-                        self._warn(f"转发 {server['port']}→{target_host}:{server['port']} 失败: {e}")
+                        self._warn(f"转发 {server['port']}→{target_host}:{target_port} 失败: {e}")
 
             self.start_btn.setText("■  停止广播")
             info = f"已开始广播 {len(self.broadcasters)} 个服务器"
             if self.forwarders:
-                info += f"，{len(self.forwarders)} 个转发已启动"
+                info += f"，{len(self.forwarders)} 个转发已启动 → {target_host}:{target_port}"
             self._info(info)
             self._timer.start(2000)
         except Exception as e:
@@ -534,6 +561,15 @@ if __name__ == "__main__":
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+
+    # 全局捕获 Ctrl+C 避免丑陋的 traceback
+    def _excepthook(typ, val, tb):
+        if issubclass(typ, KeyboardInterrupt):
+            app.quit()
+        else:
+            sys.__excepthook__(typ, val, tb)
+    sys.excepthook = _excepthook
+
     w = MainWindow()
     w.show()
     sys.exit(app.exec())

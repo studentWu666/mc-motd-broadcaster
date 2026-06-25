@@ -4,5 +4,9 @@
     "base_port": 25565,
     "interval": 3.0,
     "auto_motd": false,
-    "silent": false
+    "silent": false,
+    "enable_fwd": false,
+    "fwd_host": "localhost",
+    "fwd_port": 25565,
+    "fwd_proxy": false
 }
